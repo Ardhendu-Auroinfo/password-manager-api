@@ -3,6 +3,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const userRoutes = require('./src/routes/userRoutes');
+const vaultRoutes = require('./src/routes/vaultRoutes');
 // const errorHandler = require("./middleware/errorHandler");
 const dotenv = require('dotenv').config();
 const app = express()
@@ -24,7 +25,7 @@ app.use(limiter);
 
 // Routes
 app.use('/api/users', userRoutes);
-
+app.use('/api/vault', vaultRoutes);
 // app.use(errorHandler)
 
 app.listen(port)
