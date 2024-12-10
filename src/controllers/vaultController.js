@@ -229,6 +229,32 @@ const vaultController = {
             console.error('Error searching password entries:', error);
             res.status(500).json({ message: 'Server error' });
         }
+    },
+
+    // Add this method to vaultController
+    async getEntryById(req, res) {
+        try {
+            const userId = req.user.id;
+            const entryId = req.params.id;
+
+            const query = `
+                SELECT pe.*
+                FROM password_entries pe
+                JOIN password_vaults pv ON pe.vault_id = pv.id
+                WHERE pe.id = $1 AND pv.user_id = $2 AND pe.is_deleted = false
+            `;
+
+            const result = await db.query(query, [entryId, userId]);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ message: 'Entry not found' });
+            }
+
+            res.json(result.rows[0]);
+        } catch (error) {
+            console.error('Error fetching password entry:', error);
+            res.status(500).json({ message: 'Server error' });
+        }
     }
 };
 

@@ -22,7 +22,6 @@ const authenticateToken = async (req, res, next) => {
             `;
             
             const userResult = await db.query(userQuery, [decoded.user_id]);
-            console.log("User result:", userResult.rows);
 
             const user = userResult.rows[0];
             

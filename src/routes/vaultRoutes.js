@@ -13,5 +13,6 @@ router.post('/entries', validateEntry, vaultController.createEntry);
 router.put('/entries/:id', validateEntry, vaultController.updateEntry);
 router.delete('/entries/:id', vaultController.deleteEntry);
 router.get('/entries/search', vaultController.searchEntries);
+router.get('/entries/:id', vaultController.getEntryById);
 
 module.exports = router; 
