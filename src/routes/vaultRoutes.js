@@ -9,6 +9,7 @@ router.use(authenticateToken);
 
 // Password entries routes
 router.get('/entries', vaultController.getAllEntries);
+router.get('/entries/favorites', vaultController.getFavoriteEntries);
 router.post('/entries', validateEntry, vaultController.createEntry);
 router.put('/entries/:id', validateEntry, vaultController.updateEntry);
 router.delete('/entries/:id', vaultController.deleteEntry);

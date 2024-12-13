@@ -22,6 +22,27 @@ const vaultController = {
         }
     },
 
+    // Get all favorite password entries for a user
+    async getFavoriteEntries(req, res) {
+        try {
+            const userId = req.user.id;
+            const query = `
+                SELECT pe.*
+                FROM password_entries pe
+                JOIN password_vaults pv ON pe.vault_id = pv.id
+                WHERE pe.favorite = true 
+                AND pv.user_id = $1
+                AND pe.is_deleted = false
+                ORDER BY pe.created_at DESC
+            `;
+            const result = await db.query(query, [userId]);
+            res.json(result.rows);
+        } catch (error) {
+            console.error('Error fetching favorite password entries:', error);
+            res.status(500).json({ message: 'Server error' });
+        }
+    },
+
     // Create new password entry
     async createEntry(req, res) {
         const client = await db.connect();
