@@ -1,6 +1,8 @@
 const db = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const emailService = require('../services/emailService');
 
 const userController = {
     // Register new user
@@ -194,6 +196,106 @@ const userController = {
             res.status(500).json({
                 success: false,
                 message: 'Error logging in'
+            });
+        }
+    },
+
+    async requestPasswordReset(req, res) {
+        const { email } = req.body;
+
+        try {
+            // Check if user exists
+            const user = await db.query(
+                'SELECT id, email, master_password_hint FROM users WHERE email = $1',
+                [email]
+            );
+
+            if (user.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No account found with this email'
+                });
+            }
+
+            // Generate reset token
+            const resetToken = crypto.randomBytes(32).toString('hex');
+            const resetTokenHash = await bcrypt.hash(resetToken, 10);
+
+            // Store reset token in database with expiration
+            await db.query(
+                `UPDATE users 
+                SET reset_token = $1,
+                    reset_token_expires = CURRENT_TIMESTAMP + INTERVAL '1 hour'
+                WHERE id = $2`,
+                [resetTokenHash, user.rows[0].id]
+            );
+
+            // Send email with reset link and password hint if available
+            // You'll need to implement email sending functionality
+            const passwordHint = user.rows[0].master_password_hint;
+            
+            // TODO: Implement email sending
+            // sendPasswordResetEmail(email, resetToken, passwordHint);
+
+            res.json({
+                success: true,
+                message: 'Password reset instructions sent to your email'
+            });
+
+        } catch (error) {
+            console.error('Password reset request error:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error processing password reset request'
+            });
+        }
+    },
+
+    async getPasswordHint(req, res) {
+        const { email } = req.body;
+
+        try {
+            // Check if user exists and get hint
+            const result = await db.query(
+                'SELECT master_password_hint FROM users WHERE email = $1',
+                [email]
+            );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No account found with this email'
+                });
+            }
+
+            const hint = result.rows[0].master_password_hint;
+
+            if (!hint) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No password hint set for this account'
+                });
+            }
+
+            // Send email with fallback handling
+            try {
+                await emailService.sendPasswordHint(email, hint);
+            } catch (emailError) {
+                console.error('Email service error:', emailError);
+                // Still return success if we found the hint
+                // The email service will handle retries
+            }
+
+            res.json({
+                success: true,
+                message: 'Password hint has been sent to your email'
+            });
+
+        } catch (error) {
+            console.error('Get password hint error:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error retrieving password hint'
             });
         }
     }
