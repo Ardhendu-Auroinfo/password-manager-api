@@ -7,7 +7,7 @@ const emailService = require('../services/emailService');
 const userController = {
     // Register new user
     async register(req, res) {
-        const { email, password, password_hint } = req.body;
+        const { email, password, masterPasswordHint } = req.body;
 
         if(!email || !password ) {
             return res.status(400).json({
@@ -43,7 +43,7 @@ const userController = {
                     master_password_hint
                 ) VALUES ($1, $2, $3, $4) 
                 RETURNING id, email, created_at`,
-                [email, hashedPassword, salt, password_hint]
+                [email, hashedPassword, salt, masterPasswordHint]
             );
 
             // Create default vault for user
