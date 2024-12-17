@@ -206,7 +206,7 @@ const userController = {
         try {
             // Check if user exists
             const user = await db.query(
-                'SELECT id, email, master_password_hint FROM users WHERE email = $1',
+                'SELECT id, email FROM users WHERE email = $1',
                 [email]
             );
 
@@ -217,36 +217,172 @@ const userController = {
                 });
             }
 
-            // Generate reset token
-            const resetToken = crypto.randomBytes(32).toString('hex');
-            const resetTokenHash = await bcrypt.hash(resetToken, 10);
+            // Generate 6-digit recovery code
+            const recoveryCode = Math.floor(100000 + Math.random() * 900000).toString();
+            // Hash the recovery code before storing
+            const recoveryCodeHash = await bcrypt.hash(recoveryCode, 10);
 
-            // Store reset token in database with expiration
+            // Store recovery code with expiration (1 hour)
             await db.query(
                 `UPDATE users 
-                SET reset_token = $1,
-                    reset_token_expires = CURRENT_TIMESTAMP + INTERVAL '1 hour'
+                SET recovery_token = $1,
+                    recovery_token_expires = CURRENT_TIMESTAMP + INTERVAL '1 hour',
+                    recovery_attempt_count = 0
                 WHERE id = $2`,
-                [resetTokenHash, user.rows[0].id]
+                [recoveryCodeHash, user.rows[0].id]
             );
 
-            // Send email with reset link and password hint if available
-            // You'll need to implement email sending functionality
-            const passwordHint = user.rows[0].master_password_hint;
-            
-            // TODO: Implement email sending
-            // sendPasswordResetEmail(email, resetToken, passwordHint);
+            // Send recovery email
+            await emailService.sendPasswordRecovery(email, recoveryCode);
 
             res.json({
                 success: true,
-                message: 'Password reset instructions sent to your email'
+                message: 'Recovery code has been sent to your email'
             });
 
         } catch (error) {
-            console.error('Password reset request error:', error);
+            console.error('Password recovery request error:', error);
             res.status(500).json({
                 success: false,
-                message: 'Error processing password reset request'
+                message: 'Error processing recovery request'
+            });
+        }
+    },
+
+    async verifyRecoveryToken(req, res) {
+        const { email, token } = req.body;
+
+        try {
+            const user = await db.query(
+                `SELECT id, recovery_token, recovery_token_expires, recovery_attempt_count 
+                FROM users WHERE email = $1`,
+                [email]
+            );
+
+            if (user.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Invalid recovery attempt'
+                });
+            }
+
+            const userData = user.rows[0];
+
+            // Check if token is expired
+            if (new Date(userData.recovery_token_expires) < new Date()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Recovery code has expired'
+                });
+            }
+
+            // Check attempt count
+            if (userData.recovery_attempt_count >= 3) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Too many attempts. Please request a new recovery code'
+                });
+            }
+
+            // Verify recovery code
+            const isValidCode = await bcrypt.compare(token, userData.recovery_token);
+
+            if (!isValidCode) {
+                // Increment attempt count
+                await db.query(
+                    'UPDATE users SET recovery_attempt_count = recovery_attempt_count + 1 WHERE id = $1',
+                    [userData.id]
+                );
+
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid recovery code'
+                });
+            }
+
+            // Generate temporary token for password reset
+            const tempToken = jwt.sign(
+                { user_id: userData.id, recovery: true },
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+
+            res.json({
+                success: true,
+                tempToken
+            });
+
+        } catch (error) {
+            console.error('Recovery verification error:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error verifying recovery code'
+            });
+        }
+    },
+
+    async resetPassword(req, res) {
+        const { tempToken, newPassword } = req.body;
+
+        if (!tempToken || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required fields'
+            });
+        }
+
+        try {
+            // Verify temp token
+            let decoded;
+            try {
+                decoded = jwt.verify(tempToken, process.env.JWT_SECRET);
+            } catch (jwtError) {
+                console.error('JWT verification error:', jwtError);
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid or expired reset token'
+                });
+            }
+            
+            if (!decoded.recovery) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid reset attempt'
+                });
+            }
+
+            // Hash new password
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(String(newPassword), salt);
+
+            // Update password and clear recovery tokens
+            await db.query(
+                `UPDATE users 
+                SET master_password_hash = $1,
+                    master_password_salt = $2,
+                    recovery_token = NULL,
+                    recovery_token_expires = NULL,
+                    recovery_attempt_count = 0,
+                    failed_login_attempts = 0,
+                    account_locked_until = NULL
+                WHERE id = $3
+                RETURNING id, email`,
+                [hashedPassword, salt, decoded.user_id]
+            );
+
+            // Log the hash for debugging (remove in production)
+            console.log('New password hash:', hashedPassword);
+
+            res.json({
+                success: true,
+                message: 'Password has been reset successfully'
+            });
+
+        } catch (error) {
+            console.error('Password reset error:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error resetting password'
             });
         }
     },
