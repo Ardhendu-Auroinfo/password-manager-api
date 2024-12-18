@@ -1,11 +1,13 @@
 const db = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const emailService = require('../services/emailService');
 
 const userController = {
     // Register new user
     async register(req, res) {
-        const { email, password, password_hint } = req.body;
+        const { email, password, masterPasswordHint } = req.body;
 
         if(!email || !password ) {
             return res.status(400).json({
@@ -41,7 +43,7 @@ const userController = {
                     master_password_hint
                 ) VALUES ($1, $2, $3, $4) 
                 RETURNING id, email, created_at`,
-                [email, hashedPassword, salt, password_hint]
+                [email, hashedPassword, salt, masterPasswordHint]
             );
 
             // Create default vault for user
@@ -194,6 +196,242 @@ const userController = {
             res.status(500).json({
                 success: false,
                 message: 'Error logging in'
+            });
+        }
+    },
+
+    async requestPasswordReset(req, res) {
+        const { email } = req.body;
+
+        try {
+            // Check if user exists
+            const user = await db.query(
+                'SELECT id, email FROM users WHERE email = $1',
+                [email]
+            );
+
+            if (user.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No account found with this email'
+                });
+            }
+
+            // Generate 6-digit recovery code
+            const recoveryCode = Math.floor(100000 + Math.random() * 900000).toString();
+            // Hash the recovery code before storing
+            const recoveryCodeHash = await bcrypt.hash(recoveryCode, 10);
+
+            // Store recovery code with expiration (1 hour)
+            await db.query(
+                `UPDATE users 
+                SET recovery_token = $1,
+                    recovery_token_expires = CURRENT_TIMESTAMP + INTERVAL '1 hour',
+                    recovery_attempt_count = 0
+                WHERE id = $2`,
+                [recoveryCodeHash, user.rows[0].id]
+            );
+
+            // Send recovery email
+            await emailService.sendPasswordRecovery(email, recoveryCode);
+
+            res.json({
+                success: true,
+                message: 'Recovery code has been sent to your email'
+            });
+
+        } catch (error) {
+            console.error('Password recovery request error:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error processing recovery request'
+            });
+        }
+    },
+
+    async verifyRecoveryToken(req, res) {
+        const { email, token } = req.body;
+
+        try {
+            const user = await db.query(
+                `SELECT id, recovery_token, recovery_token_expires, recovery_attempt_count 
+                FROM users WHERE email = $1`,
+                [email]
+            );
+
+            if (user.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Invalid recovery attempt'
+                });
+            }
+
+            const userData = user.rows[0];
+
+            // Check if token is expired
+            if (new Date(userData.recovery_token_expires) < new Date()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Recovery code has expired'
+                });
+            }
+
+            // Check attempt count
+            if (userData.recovery_attempt_count >= 3) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Too many attempts. Please request a new recovery code'
+                });
+            }
+
+            // Verify recovery code
+            const isValidCode = await bcrypt.compare(token, userData.recovery_token);
+
+            if (!isValidCode) {
+                // Increment attempt count
+                await db.query(
+                    'UPDATE users SET recovery_attempt_count = recovery_attempt_count + 1 WHERE id = $1',
+                    [userData.id]
+                );
+
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid recovery code'
+                });
+            }
+
+            // Generate temporary token for password reset
+            const tempToken = jwt.sign(
+                { user_id: userData.id, recovery: true },
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+
+            res.json({
+                success: true,
+                tempToken
+            });
+
+        } catch (error) {
+            console.error('Recovery verification error:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error verifying recovery code'
+            });
+        }
+    },
+
+    async resetPassword(req, res) {
+        const { tempToken, newPassword } = req.body;
+
+        if (!tempToken || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required fields'
+            });
+        }
+
+        try {
+            // Verify temp token
+            let decoded;
+            try {
+                decoded = jwt.verify(tempToken, process.env.JWT_SECRET);
+            } catch (jwtError) {
+                console.error('JWT verification error:', jwtError);
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid or expired reset token'
+                });
+            }
+            
+            if (!decoded.recovery) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid reset attempt'
+                });
+            }
+
+            // Hash new password
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(String(newPassword), salt);
+
+            // Update password and clear recovery tokens
+            await db.query(
+                `UPDATE users 
+                SET master_password_hash = $1,
+                    master_password_salt = $2,
+                    recovery_token = NULL,
+                    recovery_token_expires = NULL,
+                    recovery_attempt_count = 0,
+                    failed_login_attempts = 0,
+                    account_locked_until = NULL
+                WHERE id = $3
+                RETURNING id, email`,
+                [hashedPassword, salt, decoded.user_id]
+            );
+
+            // Log the hash for debugging (remove in production)
+            console.log('New password hash:', hashedPassword);
+
+            res.json({
+                success: true,
+                message: 'Password has been reset successfully'
+            });
+
+        } catch (error) {
+            console.error('Password reset error:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error resetting password'
+            });
+        }
+    },
+
+    async getPasswordHint(req, res) {
+        const { email } = req.body;
+
+        try {
+            // Check if user exists and get hint
+            const result = await db.query(
+                'SELECT master_password_hint FROM users WHERE email = $1',
+                [email]
+            );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No account found with this email'
+                });
+            }
+
+            const hint = result.rows[0].master_password_hint;
+
+            if (!hint) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No password hint set for this account'
+                });
+            }
+
+            // Send email with fallback handling
+            try {
+                await emailService.sendPasswordHint(email, hint);
+            } catch (emailError) {
+                console.error('Email service error:', emailError);
+                // Still return success if we found the hint
+                // The email service will handle retries
+            }
+
+            res.json({
+                success: true,
+                message: 'Password hint has been sent to your email'
+            });
+
+        } catch (error) {
+            console.error('Get password hint error:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error retrieving password hint'
             });
         }
     }
