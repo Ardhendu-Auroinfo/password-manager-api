@@ -3,7 +3,9 @@ const router = express.Router();
 const vaultController = require('../controllers/vaultController');
 const { validateEntry } = require('../middleware/validationMiddleware');
 const { authenticateToken } = require('../middleware/authMiddleware');
+const tempAuthMiddleware = require('../middleware/tempAuthMiddleware');
 
+router.get('/entries-for-reset', tempAuthMiddleware, vaultController.getEntriesForReset);
 // All routes are protected with authentication
 router.use(authenticateToken);
 

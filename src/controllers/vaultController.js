@@ -22,6 +22,24 @@ const vaultController = {
         }
     },
 
+    async getEntriesForReset(req, res) {
+        try {
+            const userId = req.user.id; // From temp token middleware
+    
+            const query = `
+                SELECT pe.*
+                FROM password_entries pe
+                JOIN password_vaults pv ON pe.vault_id = pv.id
+                WHERE pv.user_id = $1 AND pe.is_deleted = false
+            `;
+    
+            const result = await db.query(query, [userId]);
+            res.json(result.rows);
+        } catch (error) {
+            console.error('Error fetching entries for reset:', error);
+            res.status(500).json({ message: 'Server error' });
+        }
+    },
     // Get all favorite password entries for a user
     async getFavoriteEntries(req, res) {
         try {
@@ -48,18 +66,24 @@ const vaultController = {
         const client = await db.connect();
         try {
             const userId = req.user.id;
+            console.log('User ID:', userId);
             const {
                 title,
-                username,
-                password,
-                notes,
+                encrypted_username,
+                encrypted_password,
+                encrypted_notes,
                 website_url,
                 category,
                 favorite
             } = req.body;
-
-            // Start transaction
-            await client.query('BEGIN');
+            console.log('Request body:', req.body);
+            // Validate required fields
+            if (!title || !encrypted_username || !encrypted_password) {
+                return res.status(400).json({ 
+                    message: 'Missing required fields',
+                    details: { title, hasUsername: !!encrypted_username, hasPassword: !!encrypted_password }
+                });
+            }
 
             // Get user's default vault
             const vaultResult = await client.query(
@@ -91,11 +115,11 @@ const vaultController = {
             const values = [
                 vaultId,
                 title,
-                username,    // Will be encrypted on frontend
-                password,    // Will be encrypted on frontend
-                notes,      // Will be encrypted on frontend
-                website_url,
-                category,
+                encrypted_username,
+                encrypted_password,
+                encrypted_notes || null,
+                website_url || '',
+                category || '',
                 favorite || false
             ];
 
@@ -106,7 +130,10 @@ const vaultController = {
         } catch (error) {
             await client.query('ROLLBACK');
             console.error('Error creating password entry:', error);
-            res.status(500).json({ message: 'Server error' });
+            res.status(500).json({ 
+                message: 'Server error',
+                details: error.message 
+            });
         } finally {
             client.release();
         }
@@ -120,9 +147,9 @@ const vaultController = {
             const entryId = req.params.id;
             const {
                 title,
-                username,
-                password,
-                notes,
+                encrypted_username,
+                encrypted_password,
+                encrypted_notes,
                 website_url,
                 category,
                 favorite
@@ -145,7 +172,7 @@ const vaultController = {
             await client.query('BEGIN');
 
             // Store old password in history if password is being updated
-            if (password) {
+            if (encrypted_password) {
                 const historyQuery = `
                     INSERT INTO password_history (entry_id, encrypted_password)
                     SELECT id, encrypted_password
@@ -173,9 +200,9 @@ const vaultController = {
 
             const values = [
                 title,
-                username,    // Encrypted on frontend
-                password,    // Encrypted on frontend
-                notes,      // Encrypted on frontend
+                encrypted_username,    // Encrypted on frontend
+                encrypted_password,    // Encrypted on frontend
+                encrypted_notes,      // Encrypted on frontend
                 website_url,
                 category,
                 favorite,

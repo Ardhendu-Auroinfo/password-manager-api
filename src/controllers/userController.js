@@ -3,13 +3,12 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const emailService = require('../services/emailService');
-
 const userController = {
     // Register new user
     async register(req, res) {
-        const { email, password, masterPasswordHint } = req.body;
+        const { email, authKey, masterPasswordHint, encryptedVaultKey } = req.body;
 
-        if(!email || !password ) {
+        if (!email || !authKey || !encryptedVaultKey) {
             return res.status(400).json({
                 success: false,
                 message: 'All fields are required'
@@ -30,33 +29,29 @@ const userController = {
                 });
             }
 
-            // Generate salt and hash password
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(password, salt);
-
-            // Insert new user
+            // Store user with auth key and encrypted vault key
             const newUser = await db.query(
                 `INSERT INTO users (
                     email, 
-                    master_password_hash, 
-                    master_password_salt, 
-                    master_password_hint
+                    auth_key,
+                    master_password_hint,
+                    encrypted_vault_key
                 ) VALUES ($1, $2, $3, $4) 
                 RETURNING id, email, created_at`,
-                [email, hashedPassword, salt, masterPasswordHint]
+                [email, authKey, masterPasswordHint, encryptedVaultKey]
             );
 
-            // Create default vault for user
-            await db.query(
-                `INSERT INTO password_vaults (
-                    user_id, 
-                    name, 
-                    encrypted_key
-                ) VALUES ($1, $2, $3)`,
-                [newUser.rows[0].id, 'My Vault', Buffer.from('default_key')] // You'll want to properly generate and encrypt this key
+             // Create default vault for the new user
+        await db.query(
+            `INSERT INTO password_vaults (
+                user_id, 
+                name, 
+                encrypted_key
+            ) VALUES ($1, $2, $3)`,
+                [newUser.rows[0].id, 'My Vault', Buffer.from('default_key')] // Replace with actual key generation logic
             );
 
-            // Generate JWT
+            // Generate JWT (if needed)
             const token = jwt.sign(
                 { user_id: newUser.rows[0].id },
                 process.env.JWT_SECRET,
@@ -82,10 +77,10 @@ const userController = {
 
     // Login user
     async login(req, res) {
-        const { email, password } = req.body;
+        const { email, authKey } = req.body;
 
         try {
-            // Find user
+            // Find user by email
             const user = await db.query(
                 'SELECT * FROM users WHERE email = $1',
                 [email]
@@ -106,18 +101,15 @@ const userController = {
                     message: 'Account is locked. Please try again later.'
                 });
             }
+            
+            // Convert provided authKey to hexadecimal
+            const providedAuthKeyHex = Buffer.from(authKey, 'utf8').toString('hex');
 
-            // Ensure password and hash are strings
-            const storedHash = user.rows[0].master_password_hash.toString();
-            const passwordString = String(password);
-
-            // Verify password
-            const validPassword = await bcrypt.compare(
-                passwordString,
-                storedHash
-            );
-
-            if (!validPassword) {
+            // Ensure authKey is valid
+            const storedAuthKey = user.rows[0].auth_key.toString('hex'); // Assuming it's stored as a Buffer
+            
+            
+            if (storedAuthKey !== providedAuthKeyHex) {
                 // Increment failed login attempts
                 await db.query(
                     `UPDATE users 
@@ -180,6 +172,12 @@ const userController = {
                 { expiresIn: '24h' }
             );
 
+            // Include the encrypted vault key in the response
+            const encryptedVaultKey = user.rows[0].encrypted_vault_key;
+
+            // Ensure it's properly encoded before sending
+            const encodedVaultKey = encryptedVaultKey.toString('utf8');
+
             res.json({
                 success: true,
                 data: {
@@ -187,7 +185,8 @@ const userController = {
                         id: user.rows[0].id,
                         email: user.rows[0].email
                     },
-                    token
+                    token,
+                    encryptedVaultKey: encodedVaultKey
                 }
             });
 
@@ -254,7 +253,7 @@ const userController = {
 
         try {
             const user = await db.query(
-                `SELECT id, recovery_token, recovery_token_expires, recovery_attempt_count 
+                `SELECT id, encrypted_vault_key, recovery_token, recovery_token_expires, recovery_attempt_count 
                 FROM users WHERE email = $1`,
                 [email]
             );
@@ -304,12 +303,18 @@ const userController = {
             const tempToken = jwt.sign(
                 { user_id: userData.id, recovery: true },
                 process.env.JWT_SECRET,
-                { expiresIn: '15m' }
+                { expiresIn: '24h' }
             );
+             // Include the encrypted vault key in the response
+             const encryptedVaultKey = user.rows[0].encrypted_vault_key;
+
+             // Ensure it's properly encoded before sending
+             const encodedVaultKey = encryptedVaultKey.toString('utf8');
 
             res.json({
                 success: true,
-                tempToken
+                tempToken,
+                encryptedVaultKey: encodedVaultKey
             });
 
         } catch (error) {
@@ -322,68 +327,42 @@ const userController = {
     },
 
     async resetPassword(req, res) {
-        const { tempToken, newPassword } = req.body;
-
-        if (!tempToken || !newPassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'Missing required fields'
-            });
-        }
-
+        const client = await db.connect();
         try {
-            // Verify temp token
-            let decoded;
-            try {
-                decoded = jwt.verify(tempToken, process.env.JWT_SECRET);
-            } catch (jwtError) {
-                console.error('JWT verification error:', jwtError);
-                return res.status(401).json({
-                    success: false,
-                    message: 'Invalid or expired reset token'
-                });
-            }
+            const { authKey, encryptedVaultKey, reEncryptedEntries, email } = req.body;
+            const userId = req.user.id; // From JWT verification
             
-            if (!decoded.recovery) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Invalid reset attempt'
-                });
-            }
+            await client.query('BEGIN');
 
-            // Hash new password
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(String(newPassword), salt);
-
-            // Update password and clear recovery tokens
-            await db.query(
-                `UPDATE users 
-                SET master_password_hash = $1,
-                    master_password_salt = $2,
-                    recovery_token = NULL,
-                    recovery_token_expires = NULL,
-                    recovery_attempt_count = 0,
-                    failed_login_attempts = 0,
-                    account_locked_until = NULL
-                WHERE id = $3
-                RETURNING id, email`,
-                [hashedPassword, salt, decoded.user_id]
+            // Update user's auth key and vault key
+            await client.query(
+                'UPDATE users SET auth_key = $1, encrypted_vault_key = $2 WHERE email = $3',
+                [authKey, encryptedVaultKey, email]
             );
 
-            // Log the hash for debugging (remove in production)
-            console.log('New password hash:', hashedPassword);
+            // Update all password entries with re-encrypted data
+            for (const entry of reEncryptedEntries) {
+                await client.query(
+                    `UPDATE password_entries 
+                     SET encrypted_username = $1, encrypted_password = $2, encrypted_notes = $3
+                     WHERE id = $4 AND vault_id = $5`,
+                    [
+                        entry.encrypted_username, 
+                        entry.encrypted_password, 
+                        entry.encrypted_notes, 
+                        entry.id,
+                        userId
+                    ]
+                );
+            }
 
-            res.json({
-                success: true,
-                message: 'Password has been reset successfully'
-            });
-
+            await client.query('COMMIT');
+            res.json({ success: true });
         } catch (error) {
-            console.error('Password reset error:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Error resetting password'
-            });
+            await client.query('ROLLBACK');
+            res.status(500).json({ success: false, message: error.message });
+        } finally {
+            client.release();
         }
     },
 

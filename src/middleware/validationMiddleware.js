@@ -2,8 +2,8 @@ const { body, validationResult } = require('express-validator');
 
 const validateEntry = [
     body('title').trim().notEmpty().withMessage('Title is required'),
-    body('username').optional().trim(),
-    body('password').notEmpty().withMessage('Password is required'),
+    body('encrypted_username').optional().trim(),
+    body('encrypted_password').notEmpty().withMessage('Password is required'),
     body('website_url').optional().trim().isURL().withMessage('Invalid URL format'),
     body('category').optional().trim(),
     body('favorite').optional().isBoolean(),
