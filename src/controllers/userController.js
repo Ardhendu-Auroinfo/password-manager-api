@@ -298,23 +298,64 @@ const userController = {
                     message: 'Invalid recovery code'
                 });
             }
+            // Fetch the encrypted key from the password_vaults table
+        const vault = await db.query(
+            `SELECT encrypted_key FROM password_vaults WHERE user_id = $1 LIMIT 1`,
+            [userData.id]
+        );
 
-            // Generate temporary token for password reset
-            const tempToken = jwt.sign(
-                { user_id: userData.id, recovery: true },
-                process.env.JWT_SECRET,
-                { expiresIn: '24h' }
+        if (vault.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No vault found for user'
+            });
+        }
+
+            const encryptedKey = vault.rows[0].encrypted_key;
+
+
+            // Create session
+            const sessionResult = await db.query(
+                `INSERT INTO user_sessions (
+                    user_id,
+                    token_hash,
+                    device_info,
+                    ip_address,
+                    expires_at
+                ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP + INTERVAL '1 hour')
+                RETURNING id`,
+                [
+                    userData.id,
+                    'session_token', // You should generate a proper session token
+                    JSON.stringify({ userAgent: req.headers['user-agent'] }),
+                    req.ip
+                ]
             );
-             // Include the encrypted vault key in the response
-             const encryptedVaultKey = user.rows[0].encrypted_vault_key;
 
-             // Ensure it's properly encoded before sending
-             const encodedVaultKey = encryptedVaultKey.toString('utf8');
+            // Generate temporary token with session info
+            const tempToken = jwt.sign(
+                { 
+                    user_id: userData.id,
+                    session_id: sessionResult.rows[0].id,
+                    recovery: true 
+                },
+                process.env.JWT_SECRET,
+                { expiresIn: '1h' }
+            );
+
+            // Include the encrypted vault key in the response
+            const encryptedVaultKey = user.rows[0].encrypted_vault_key;
+            const encodedVaultKey = encryptedVaultKey.toString('utf8');
 
             res.json({
                 success: true,
                 tempToken,
-                encryptedVaultKey: encodedVaultKey
+                encryptedVaultKey: encodedVaultKey,
+                encryptedKey: Buffer.from(encryptedKey).toString('base64'),
+                user: {
+                    id: userData.id,
+                    email: email
+                }
             });
 
         } catch (error) {
@@ -330,7 +371,7 @@ const userController = {
         const client = await db.connect();
         try {
             const { authKey, encryptedVaultKey, reEncryptedEntries, email } = req.body;
-            const userId = req.user.id; // From JWT verification
+            // const userId = req.user.id; // From JWT verification
             
             await client.query('BEGIN');
 
@@ -351,7 +392,7 @@ const userController = {
                         entry.encrypted_password, 
                         entry.encrypted_notes, 
                         entry.id,
-                        userId
+                        entry.vault_id
                     ]
                 );
             }

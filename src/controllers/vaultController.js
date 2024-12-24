@@ -66,7 +66,6 @@ const vaultController = {
         const client = await db.connect();
         try {
             const userId = req.user.id;
-            console.log('User ID:', userId);
             const {
                 title,
                 encrypted_username,
