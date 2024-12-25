@@ -144,29 +144,87 @@ const userController = {
                 [user.rows[0].id]
             );
 
-            // Create session
-            const sessionResult = await db.query(
-                `INSERT INTO user_sessions (
-                    user_id,
-                    token_hash,
-                    device_info,
-                    ip_address,
-                    expires_at
-                ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP + INTERVAL '24 hours')
-                RETURNING id`,
+            // First, clean up expired sessions
+            await db.query(
+                `DELETE FROM user_sessions 
+                WHERE expires_at < CURRENT_TIMESTAMP`
+            );
+
+            // Check for existing valid session from same device
+            const existingSession = await db.query(
+                `SELECT id FROM user_sessions 
+                WHERE user_id = $1 
+                AND device_info = $2 
+                AND ip_address = $3 
+                AND expires_at > CURRENT_TIMESTAMP`,
                 [
                     user.rows[0].id,
-                    'session_token', // You should generate a proper session token
                     JSON.stringify({ userAgent: req.headers['user-agent'] }),
                     req.ip
                 ]
             );
 
-            // Generate JWT
+            let sessionId;
+
+            if (existingSession.rows.length > 0) {
+                // Update existing session expiry
+                await db.query(
+                    `UPDATE user_sessions 
+                    SET expires_at = CURRENT_TIMESTAMP + INTERVAL '24 hours'
+                    WHERE id = $1
+                    RETURNING id`,
+                    [existingSession.rows[0].id]
+                );
+                sessionId = existingSession.rows[0].id;
+            } else {
+                // Check total active sessions for user (optional)
+                const activeSessions = await db.query(
+                    `SELECT COUNT(*) FROM user_sessions 
+                    WHERE user_id = $1 
+                    AND expires_at > CURRENT_TIMESTAMP`,
+                    [user.rows[0].id]
+                );
+
+                // Optional: Limit number of active sessions (e.g., max 5)
+                if (activeSessions.rows[0].count >= 5) {
+                    // Remove oldest session
+                    await db.query(
+                        `DELETE FROM user_sessions 
+                        WHERE id IN (
+                            SELECT id FROM user_sessions 
+                            WHERE user_id = $1 
+                            ORDER BY created_at ASC 
+                            LIMIT 1
+                        )`,
+                        [user.rows[0].id]
+                    );
+                }
+
+                // Create new session
+                const sessionResult = await db.query(
+                    `INSERT INTO user_sessions (
+                        user_id,
+                        token_hash,
+                        device_info,
+                        ip_address,
+                        expires_at
+                    ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP + INTERVAL '24 hours')
+                    RETURNING id`,
+                    [
+                        user.rows[0].id,
+                        'session_token', // You should generate a proper session token
+                        JSON.stringify({ userAgent: req.headers['user-agent'] }),
+                        req.ip
+                    ]
+                );
+                sessionId = sessionResult.rows[0].id;
+            }
+
+            // Generate JWT with session ID
             const token = jwt.sign(
                 { 
                     user_id: user.rows[0].id,
-                    session_id: sessionResult.rows[0].id
+                    session_id: sessionId
                 },
                 process.env.JWT_SECRET,
                 { expiresIn: '24h' }
