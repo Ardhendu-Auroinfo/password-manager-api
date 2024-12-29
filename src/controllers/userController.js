@@ -3,6 +3,8 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const emailService = require('../services/emailService');
+const { encryptEmail, decryptEmail } = require('../utils/encryption');
+
 const userController = {
     // Register new user
     async register(req, res) {
@@ -16,10 +18,12 @@ const userController = {
         }
 
         try {
+            const encryptedEmail = encryptEmail(email);
+            
             // Check if user already exists
             const userExists = await db.query(
                 'SELECT * FROM users WHERE email = $1',
-                [email]
+                [encryptedEmail]
             );
 
             if (userExists.rows.length > 0) {
@@ -38,7 +42,7 @@ const userController = {
                     encrypted_vault_key
                 ) VALUES ($1, $2, $3, $4) 
                 RETURNING id, email, created_at`,
-                [email, authKey, masterPasswordHint, encryptedVaultKey]
+                [encryptedEmail, authKey, masterPasswordHint, encryptedVaultKey]
             );
 
              // Create default vault for the new user
@@ -58,10 +62,16 @@ const userController = {
                 { expiresIn: '24h' }
             );
 
+            // Decrypt email before sending in response
+            const userData = {
+                ...newUser.rows[0],
+                email: decryptEmail(newUser.rows[0].email)
+            };
+
             res.status(201).json({
                 success: true,
                 data: {
-                    user: newUser.rows[0],
+                    user: userData,
                     token
                 }
             });
@@ -80,10 +90,13 @@ const userController = {
         const { email, authKey } = req.body;
 
         try {
-            // Find user by email
+            const encryptedEmail = encryptEmail(email);
+            console.log(encryptedEmail);
+            
+            // Find user by encrypted email
             const user = await db.query(
                 'SELECT * FROM users WHERE email = $1',
-                [email]
+                [encryptedEmail]
             );
 
             if (user.rows.length === 0) {
@@ -241,7 +254,7 @@ const userController = {
                 data: {
                     user: {
                         id: user.rows[0].id,
-                        email: user.rows[0].email
+                        email: decryptEmail(user.rows[0].email)
                     },
                     token,
                     encryptedVaultKey: encodedVaultKey
