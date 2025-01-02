@@ -276,7 +276,9 @@ const userController = {
 
         try {
             // Check if user exists
+            console.log("email", email)
             const encryptedEmail = encryptEmail(email);
+            console.log("encryptedEmail", encryptedEmail)
             const user = await db.query(
                 'SELECT id, email FROM users WHERE email = $1',
                 [encryptedEmail]
@@ -487,9 +489,10 @@ const userController = {
 
         try {
             // Check if user exists and get hint
+            const encryptedEmail = encryptEmail(email);
             const result = await db.query(
                 'SELECT master_password_hint FROM users WHERE email = $1',
-                [email]
+                [encryptedEmail]
             );
 
             if (result.rows.length === 0) {
