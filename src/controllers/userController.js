@@ -8,7 +8,7 @@ const { encryptEmail, decryptEmail } = require('../utils/encryption');
 const userController = {
     // Register new user
     async register(req, res) {
-        const { email, authKey, masterPasswordHint, encryptedVaultKey } = req.body;
+        const { email, authKey, masterPasswordHint, encryptedVaultKey, encryptedKey } = req.body;
 
         if (!email || !authKey || !encryptedVaultKey) {
             return res.status(400).json({
@@ -39,10 +39,11 @@ const userController = {
                     email, 
                     auth_key,
                     master_password_hint,
-                    encrypted_vault_key
-                ) VALUES ($1, $2, $3, $4) 
+                    encrypted_vault_key,
+                    encrypted_key
+                ) VALUES ($1, $2, $3, $4, $5) 
                 RETURNING id, email, created_at`,
-                [encryptedEmail, authKey, masterPasswordHint, encryptedVaultKey]
+                [encryptedEmail, authKey, masterPasswordHint, encryptedVaultKey, encryptedKey]
             );
 
              // Create default vault for the new user
@@ -326,7 +327,7 @@ const userController = {
         try {
             const encryptedEmail = encryptEmail(email);
             const user = await db.query(
-                `SELECT id, encrypted_vault_key, recovery_token, recovery_token_expires, recovery_attempt_count 
+                `SELECT id, encrypted_vault_key, recovery_token, recovery_token_expires, recovery_attempt_count, encrypted_key
                 FROM users WHERE email = $1`,
                 [encryptedEmail]
             );
@@ -384,7 +385,7 @@ const userController = {
             });
         }
 
-            const encryptedKey = vault.rows[0].encrypted_key;
+            // const encryptedKey = vault.rows[0].encrypted_key;
 
 
             // Create session
@@ -419,12 +420,12 @@ const userController = {
             // Include the encrypted vault key in the response
             const encryptedVaultKey = user.rows[0].encrypted_vault_key;
             const encodedVaultKey = encryptedVaultKey.toString('utf8');
-
+            const encryptedKey = user.rows[0].encrypted_key;
             res.json({
                 success: true,
                 tempToken,
                 encryptedVaultKey: encodedVaultKey,
-                encryptedKey: Buffer.from(encryptedKey).toString('base64'),
+                encryptedKey: encryptedKey,
                 user: {
                     id: userData.id,
                     email: email
@@ -443,7 +444,7 @@ const userController = {
     async resetPassword(req, res) {
         const client = await db.connect();
         try {
-            const { authKey, encryptedVaultKey, reEncryptedEntries, email } = req.body;
+            const { authKey, encryptedVaultKey, reEncryptedEntries, email, encryptionKey } = req.body;
             // Encrypt email before using in query
             const encryptedEmail = encryptEmail(email);
             
@@ -451,8 +452,8 @@ const userController = {
 
             // Update user's auth key and vault key using encrypted email
             await client.query(
-                'UPDATE users SET auth_key = $1, encrypted_vault_key = $2 WHERE email = $3',
-                [authKey, encryptedVaultKey, encryptedEmail]
+                'UPDATE users SET auth_key = $1, encrypted_vault_key = $2, encrypted_key = $3 WHERE email = $4',
+                [authKey, encryptedVaultKey, encryptionKey, encryptedEmail]
             );
 
             // Update all password entries with re-encrypted data
