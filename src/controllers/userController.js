@@ -275,9 +275,10 @@ const userController = {
 
         try {
             // Check if user exists
+            const encryptedEmail = encryptEmail(email);
             const user = await db.query(
                 'SELECT id, email FROM users WHERE email = $1',
-                [email]
+                [encryptedEmail]
             );
 
             if (user.rows.length === 0) {
@@ -323,10 +324,11 @@ const userController = {
         const { email, token } = req.body;
 
         try {
+            const encryptedEmail = encryptEmail(email);
             const user = await db.query(
                 `SELECT id, encrypted_vault_key, recovery_token, recovery_token_expires, recovery_attempt_count 
                 FROM users WHERE email = $1`,
-                [email]
+                [encryptedEmail]
             );
 
             if (user.rows.length === 0) {
@@ -442,14 +444,15 @@ const userController = {
         const client = await db.connect();
         try {
             const { authKey, encryptedVaultKey, reEncryptedEntries, email } = req.body;
-            // const userId = req.user.id; // From JWT verification
+            // Encrypt email before using in query
+            const encryptedEmail = encryptEmail(email);
             
             await client.query('BEGIN');
 
-            // Update user's auth key and vault key
+            // Update user's auth key and vault key using encrypted email
             await client.query(
                 'UPDATE users SET auth_key = $1, encrypted_vault_key = $2 WHERE email = $3',
-                [authKey, encryptedVaultKey, email]
+                [authKey, encryptedVaultKey, encryptedEmail]
             );
 
             // Update all password entries with re-encrypted data
