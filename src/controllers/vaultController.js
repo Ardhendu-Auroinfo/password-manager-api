@@ -75,7 +75,6 @@ const vaultController = {
                 category,
                 favorite
             } = req.body;
-            console.log('Request body:', req.body);
             // Validate required fields
             if (!title || !encrypted_username || !encrypted_password) {
                 return res.status(400).json({ 
