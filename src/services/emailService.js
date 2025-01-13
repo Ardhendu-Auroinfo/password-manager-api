@@ -290,6 +290,77 @@ class EmailService {
             await this.sendEmail(emailContent);
         }
     }
+
+    async sendShareNotification(recipientEmail, sharedByEmail, sharedPasswordName) {
+        const emailContent = {
+            to: recipientEmail,
+            subject: `Password shared with you by ${sharedByEmail}`,
+            html: `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <title>Password Manager - Shared Password</title>
+                    <style>
+                        body {
+                            font-family: Arial, sans-serif;
+                            line-height: 1.6;
+                            color: #333333;
+                            margin: 0;
+                            padding: 0;
+                        }
+                        .container {
+                            max-width: 600px;
+                            margin: 0 auto;
+                            padding: 20px;
+                            background-color: #ffffff;
+                        }
+                        .header {
+                            background-color: #8d9199;
+                            color: white;
+                            padding: 20px;
+                            text-align: center;
+                            border-radius: 5px 5px 0 0;
+                        }
+                        .content {
+                            padding: 20px;
+                            background-color: #f9fafb;
+                            border: 1px solid #e5e7eb;
+                            border-radius: 0 0 5px 5px;
+                        }
+                        
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h2>LockdownPass - Password Manager</h2>
+                        </div>
+                        
+                        <div class="content">
+                            <p>Hello,</p>
+                            <br>
+                            <p>A password has been shared with you:</p>
+                            <ul>
+                                <li><strong>Title:</strong> ${sharedPasswordName}</li>
+                                <li><strong>Shared By:</strong> ${sharedByEmail}</li>
+                            </ul>
+                            <p>You can access this password by logging into your Password Manager account.</p>
+                            <br>
+                        </div>
+                    </div>
+                </body>
+                </html>
+            `
+        };
+
+        try {
+            await this.emailQueue.add(emailContent);
+        } catch (error) {
+            console.error('Queue error, trying direct send:', error);
+            await this.sendEmail(emailContent);
+        }
+    }
 }
 
 // Create singleton instance
