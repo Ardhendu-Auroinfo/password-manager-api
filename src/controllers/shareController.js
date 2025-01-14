@@ -138,6 +138,20 @@ const shareController = {
             console.error('Error fetching shared by me passwords:', error);
             res.status(500).json({ message: 'Server error' });
         }
+    },
+    async revokeAccess(req, res) {
+        const { id } = req.params;
+        console.log('Revoking access for shared password with ID:', id);
+        const client = await db.connect();
+        try {
+            await client.query('DELETE FROM shared_passwords WHERE id = $1', [id]);
+            res.status(200).json({ message: 'Access revoked successfully' });
+        } catch (error) {
+            console.error('Error revoking access:', error);
+            res.status(500).json({ message: 'Server error' });
+        } finally {
+            client.release();
+        }
     }
 };
 

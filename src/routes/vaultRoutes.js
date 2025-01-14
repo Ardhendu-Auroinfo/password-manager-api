@@ -22,5 +22,6 @@ router.get('/entries/:id', vaultController.getEntryById);
 router.post('/share', shareController.sharePassword);
 router.get('/shared-passwords', shareController.getSharedPasswords);
 router.get('/shared-by-me', shareController.getSharedByMePasswords);
+router.delete('/share/:id', shareController.revokeAccess);
 
 module.exports = router; 
