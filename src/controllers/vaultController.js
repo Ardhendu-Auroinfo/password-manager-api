@@ -150,37 +150,45 @@ const vaultController = {
                 encrypted_notes,
                 website_url,
                 category,
-                favorite
+                favorite,
+                isSharedUpdate
             } = req.body;
 
-            // Verify ownership
-            const verifyQuery = `
-                SELECT pe.id
-                FROM password_entries pe
-                JOIN password_vaults pv ON pe.vault_id = pv.id
-                WHERE pe.id = $1 AND pv.user_id = $2
-            `;
+            let hasAccess = false;
+            console.log("isSharedUpdate", isSharedUpdate);
+            console.log("entryId", entryId);
+            console.log("userId", userId);
 
-            const verifyResult = await client.query(verifyQuery, [entryId, userId]);
-            if (verifyResult.rows.length === 0) {
-                return res.status(404).json({ message: 'Entry not found' });
-            }
-
-            // Start transaction
-            await client.query('BEGIN');
-
-            // Store old password in history if password is being updated
-            if (encrypted_password) {
-                const historyQuery = `
-                    INSERT INTO password_history (entry_id, encrypted_password)
-                    SELECT id, encrypted_password
-                    FROM password_entries
-                    WHERE id = $1
+            if (isSharedUpdate) {
+                // Only check share access if it's a shared user update
+                const shareAccessQuery = `
+                    SELECT s.id
+                    FROM shared_passwords s
+                    WHERE s.entry_id = $1 
+                    AND s.shared_with = $2 
+                    AND s.permission_level IN ('write', 'admin')
+                    AND (s.expires_at IS NULL OR s.expires_at > CURRENT_TIMESTAMP)
                 `;
-                await client.query(historyQuery, [entryId]);
+                const shareAccessResult = await client.query(shareAccessQuery, [entryId, userId]);
+                console.log("shareAccessResult", shareAccessResult);
+                hasAccess = shareAccessResult.rows.length > 0;
+            } else {
+                // Check ownership for regular updates
+                const ownershipQuery = `
+                    SELECT pe.id
+                    FROM password_entries pe
+                    JOIN password_vaults pv ON pe.vault_id = pv.id
+                    WHERE pe.id = $1 AND pv.user_id = $2
+                `;
+                const ownershipResult = await client.query(ownershipQuery, [entryId, userId]);
+                hasAccess = ownershipResult.rows.length > 0;
             }
 
-            // Update entry
+            if (!hasAccess) {
+                return res.status(404).json({ message: 'Entry not found or insufficient permissions' });
+            }
+
+            // Rest of the update logic remains the same
             const updateQuery = `
                 UPDATE password_entries
                 SET
@@ -198,9 +206,9 @@ const vaultController = {
 
             const values = [
                 title,
-                encrypted_username,    // Encrypted on frontend
-                encrypted_password,    // Encrypted on frontend
-                encrypted_notes,      // Encrypted on frontend
+                encrypted_username,
+                encrypted_password,
+                encrypted_notes,
                 website_url,
                 category,
                 favorite,
