@@ -87,7 +87,7 @@ const shareController = {
                 JOIN password_entries pe ON sp.entry_id = pe.id
                 JOIN users u ON sp.shared_by = u.id
                 WHERE sp.shared_with = $1 
-                AND (sp.expires_at IS NULL OR sp.expires_at > CURRENT_TIMESTAMP)
+                
             `;
 
             const result = await db.query(query, [userId]);
@@ -122,7 +122,7 @@ const shareController = {
                 JOIN password_entries pe ON sp.entry_id = pe.id
                 JOIN users u ON sp.shared_with = u.id
                 WHERE sp.shared_by = $1 
-                AND (sp.expires_at IS NULL OR sp.expires_at > CURRENT_TIMESTAMP)
+                
             `;
     
             const result = await db.query(query, [userId]);
@@ -186,6 +186,44 @@ const shareController = {
             res.json({ message: 'Permission level updated successfully' });
         } catch (error) {
             console.error('Error updating permission level:', error);
+            res.status(500).json({ message: 'Server error' });
+        } finally {
+            client.release();
+        }
+    },
+    async updateExpiry(req, res) {
+        const client = await db.connect();
+        try {
+            const { id } = req.params;
+            const { expires_at } = req.body;
+            const userId = req.user.id;
+
+            // Verify ownership
+            const ownershipQuery = `
+                SELECT s.id 
+                FROM shared_passwords s
+                JOIN password_entries pe ON s.entry_id = pe.id
+                JOIN password_vaults pv ON pe.vault_id = pv.id
+                WHERE s.id = $1 AND pv.user_id = $2
+            `;
+            const ownershipResult = await client.query(ownershipQuery, [id, userId]);
+            
+            if (ownershipResult.rows.length === 0) {
+                return res.status(403).json({ message: 'Not authorized to update this share' });
+            }
+
+            // Update expiry
+            const updateQuery = `
+                UPDATE shared_passwords 
+                SET expires_at = $1
+                WHERE id = $2
+                RETURNING *
+            `;
+            await client.query(updateQuery, [expires_at, id]);
+            
+            res.json({ message: 'Expiry updated successfully' });
+        } catch (error) {
+            console.error('Error updating expiry:', error);
             res.status(500).json({ message: 'Server error' });
         } finally {
             client.release();
