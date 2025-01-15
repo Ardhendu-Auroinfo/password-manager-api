@@ -23,5 +23,6 @@ router.post('/share', shareController.sharePassword);
 router.get('/shared-passwords', shareController.getSharedPasswords);
 router.get('/shared-by-me', shareController.getSharedByMePasswords);
 router.delete('/share/:id', shareController.revokeAccess);
+router.put('/share/:id/permission', shareController.updatePermissionLevel);
 
 module.exports = router; 

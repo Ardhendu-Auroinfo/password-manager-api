@@ -152,6 +152,44 @@ const shareController = {
         } finally {
             client.release();
         }
+    },
+    async updatePermissionLevel(req, res) {
+        const client = await db.connect();
+        try {
+            const { id } = req.params;
+            const { permission_level } = req.body;
+            const userId = req.user.id;
+
+            // Verify ownership
+            const ownershipQuery = `
+                SELECT s.id 
+                FROM shared_passwords s
+                JOIN password_entries pe ON s.entry_id = pe.id
+                JOIN password_vaults pv ON pe.vault_id = pv.id
+                WHERE s.id = $1 AND pv.user_id = $2
+            `;
+            const ownershipResult = await client.query(ownershipQuery, [id, userId]);
+            
+            if (ownershipResult.rows.length === 0) {
+                return res.status(403).json({ message: 'Not authorized to update this share' });
+            }
+
+            // Update permission level
+            const updateQuery = `
+                UPDATE shared_passwords 
+                SET permission_level = $1
+                WHERE id = $2
+                RETURNING *
+            `;
+            await client.query(updateQuery, [permission_level, id]);
+            
+            res.json({ message: 'Permission level updated successfully' });
+        } catch (error) {
+            console.error('Error updating permission level:', error);
+            res.status(500).json({ message: 'Server error' });
+        } finally {
+            client.release();
+        }
     }
 };
 
