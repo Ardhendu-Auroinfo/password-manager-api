@@ -4,6 +4,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const userRoutes = require('./src/routes/userRoutes');
 const vaultRoutes = require('./src/routes/vaultRoutes');
+const categoryRoutes = require('./src/routes/categoryRoutes');
 // const errorHandler = require("./middleware/errorHandler");
 const dotenv = require('dotenv').config();
 const app = express()
@@ -26,6 +27,7 @@ app.use(limiter);
 // Routes
 app.use('/api/users', userRoutes);
 app.use('/api/vault', vaultRoutes);
+app.use('/api/categories', categoryRoutes);
 // app.use(errorHandler)
 
 app.listen(port)

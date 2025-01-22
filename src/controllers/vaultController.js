@@ -149,15 +149,12 @@ const vaultController = {
                 encrypted_password,
                 encrypted_notes,
                 website_url,
-                category,
+                category_id,
                 favorite,
                 isSharedUpdate
             } = req.body;
 
             let hasAccess = false;
-            console.log("isSharedUpdate", isSharedUpdate);
-            console.log("entryId", entryId);
-            console.log("userId", userId);
 
             if (isSharedUpdate) {
                 // Only check share access if it's a shared user update
@@ -197,12 +194,14 @@ const vaultController = {
                     encrypted_password = COALESCE($3, encrypted_password),
                     encrypted_notes = COALESCE($4, encrypted_notes),
                     website_url = COALESCE($5, website_url),
-                    category = COALESCE($6, category),
+                    category_id = $6,
                     favorite = COALESCE($7, favorite),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = $8
                 RETURNING *
             `;
+
+            const categoryId = req.body.category_id || null; // Convert empty string to null
 
             const values = [
                 title,
@@ -210,7 +209,7 @@ const vaultController = {
                 encrypted_password,
                 encrypted_notes,
                 website_url,
-                category,
+                categoryId,
                 favorite,
                 entryId
             ];
@@ -307,6 +306,55 @@ const vaultController = {
             res.json(result.rows[0]);
         } catch (error) {
             console.error('Error fetching password entry:', error);
+            res.status(500).json({ message: 'Server error' });
+        }
+    },
+
+    // Add a category to a password entry
+    async addCategoryToEntry(req, res) {
+        try {
+            const { id } = req.params;
+            const { categoryId } = req.body;
+
+            const query = `
+                UPDATE password_entries
+                SET category_id = $1
+                WHERE id = $2
+                RETURNING *
+            `;
+            const result = await db.query(query, [categoryId, id]);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ message: 'Entry not found' });
+            }
+
+            res.json(result.rows[0]);
+        } catch (error) {
+            console.error('Error adding category to entry:', error);
+            res.status(500).json({ message: 'Server error' });
+        }
+    },
+
+    // Remove a category from a password entry
+    async removeCategoryFromEntry(req, res) {
+        try {
+            const { id } = req.params;
+
+            const query = `
+                UPDATE password_entries
+                SET category_id = NULL
+                WHERE id = $1
+                RETURNING *
+            `;
+            const result = await db.query(query, [id]);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ message: 'Entry not found' });
+            }
+
+            res.json(result.rows[0]);
+        } catch (error) {
+            console.error('Error removing category from entry:', error);
             res.status(500).json({ message: 'Server error' });
         }
     }

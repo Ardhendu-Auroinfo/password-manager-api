@@ -26,4 +26,10 @@ router.delete('/share/:id', shareController.revokeAccess);
 router.put('/share/:id/permission', shareController.updatePermissionLevel);
 router.put('/share/:id/expiry', shareController.updateExpiry);
 
+// Add a category to a password entry
+router.post('/entry/:id/category', vaultController.addCategoryToEntry);
+
+// Remove a category from a password entry
+router.delete('/entry/:id/category', vaultController.removeCategoryFromEntry);
+
 module.exports = router; 
