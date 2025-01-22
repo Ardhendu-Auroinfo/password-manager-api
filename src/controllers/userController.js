@@ -92,7 +92,6 @@ const userController = {
 
         try {
             const encryptedEmail = encryptEmail(email);
-            console.log(encryptedEmail);
             
             // Find user by encrypted email
             const user = await db.query(
@@ -276,9 +275,7 @@ const userController = {
 
         try {
             // Check if user exists
-            console.log("email", email)
             const encryptedEmail = encryptEmail(email);
-            console.log("encryptedEmail", encryptedEmail)
             const user = await db.query(
                 'SELECT id, email FROM users WHERE email = $1',
                 [encryptedEmail]
