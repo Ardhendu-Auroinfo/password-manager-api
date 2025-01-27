@@ -72,7 +72,7 @@ const vaultController = {
                 encrypted_password,
                 encrypted_notes,
                 website_url,
-                category,
+                category_id,
                 favorite
             } = req.body;
             // Validate required fields
@@ -103,7 +103,7 @@ const vaultController = {
                     encrypted_password,
                     encrypted_notes,
                     website_url,
-                    category,
+                    category_id,
                     favorite
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -117,7 +117,7 @@ const vaultController = {
                 encrypted_password,
                 encrypted_notes || null,
                 website_url || '',
-                category || '',
+                category_id || null,
                 favorite || false
             ];
 
